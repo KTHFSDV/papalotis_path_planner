@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>time_pub_sub_pkg</name> <!-- TODO: This should match the name of the package -->
+  <name>papalotis_path_planner</name> <!-- TODO: This should match the name of the package -->
   <version>0.0.1</version>
-  <description>The time_pub_sub package</description>
+  <description>The converted Papalotis path planner to be working with our pipeline package</description>
   
   <maintainer email="you@example.com">Your Name</maintainer>
 

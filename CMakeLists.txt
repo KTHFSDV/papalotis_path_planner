@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.0.2)
 
-project(time_pub_sub_pkg)  #<--- TODO: change this to your own package name
+project(papalotis_path_planner)  #<--- TODO: change this to your own package name
  
 ## Compile as C++11, supported in ROS Noetic and newer
 add_compile_options(-std=c++11)
