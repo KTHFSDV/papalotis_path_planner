@@ -1,0 +1,54 @@
+version: '3.8'
+
+### -----------ROS MASTER----------------- ###
+# Do not edit! Works with melodic and noetic
+services:
+  master:
+    container_name: 
+      master-container
+    image: ros:noetic-ros-core-focal
+    environment:
+      - ROS_DISTRO=noetic
+      - DISPLAY=novnc:0.0
+    restart: unless-stopped
+    network_mode: host
+    command: bash -c "source /opt/ros/noetic/setup.bash && roscore"
+
+### -----------NOVNC----------------- ###
+  novnc:  
+    image: theasp/novnc:latest
+    environment:
+      - DISPLAY_WIDTH=1920
+      - DISPLAY_HEIGHT=1080
+    ports:
+      - "8080:8080"
+    networks:
+      - x11
+
+### -----------PACKAGE----------------- ###
+  dv-template-package:
+    depends_on:
+      - master
+      - novnc
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    network_mode: host
+    #runtime: nvidia 
+    environment:
+      - PACKAGE_NAME=dv-template-package
+      - ROS_MASTER_URI=http://master:11311 
+      - DISPLAY=novnc:0.0
+    volumes:
+      - ./:/ws/src/dv-template-package
+      - ./fs_msgs:/ws/src/fs_msgs:ro # read only
+    networks:
+      - x11
+    entrypoint: /ws/src/dv-template-package/docker-entrypoint.sh 
+    command: bash -c "source devel/setup.bash && roslaunch --wait --log time_pub_sub_pkg launch.launch"
+
+networks:
+  ros_network:
+    driver: bridge
+  x11:

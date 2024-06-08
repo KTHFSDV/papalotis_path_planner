@@ -1,0 +1,3 @@
+# This is a generic example. Adjust according to your needs.
+time_publisher:
+  publish_rate: 1.0  # Time interval in seconds

@@ -1,0 +1,110 @@
+name: Docker CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      
+jobs:
+  check_files:
+    runs-on: ubuntu-latest
+  
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Check for Dockerfile
+      run: |
+        if [ ! -f Dockerfile ]; then
+          echo "Dockerfile not found!"
+          exit 1
+        fi
+
+    - name: Check for docker-compose file
+      run: |
+        if [ ! -f docker-compose.yml ]; then
+          echo "docker-compose.yml not found!"
+          exit 1
+        fi
+
+    - name: Check for docker-entrypoint.sh file
+      run: |
+        if [ ! -f docker-entrypoint.sh ]; then
+          echo "docker-entrypoint.sh not found!"
+          exit 1
+        fi
+
+  docker_operations:
+    needs: check_files
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Docker Compose Action
+      uses: isbang/compose-action@v1.5.1
+
+    - name: Container Health Check
+      env:
+        COMPOSE_UP_TIMEOUT_SECONDS: 120
+      run: |
+        for ((i = 0; i <= $COMPOSE_UP_TIMEOUT_SECONDS; i += 2)); do
+          if [[ $(docker ps --format "{{.Names}}") == *$(basename "$(pwd)")* ]]; then
+            echo "Container found after $i seconds!"
+            break
+          fi
+
+          if [[ $i -ge $COMPOSE_UP_TIMEOUT_SECONDS ]]; then
+            echo "TIMEOUT: Container not found!"
+            echo "Output from docker ps: $(docker ps)"
+            echo "Output from docker ps --format: $(docker ps --format "{{.Names}}")"
+            exit 1
+          fi
+          sleep 2
+        done
+
+    - name: Build Health Check
+      env:
+        CATKIN_BUILD_TIMEOUT_SECONDS: 1200
+      run: |
+        sleep 5
+        for ((i = 5; i <= $CATKIN_BUILD_TIMEOUT_SECONDS; i += 10)); do
+
+          container_initialized=false
+          # Loop through the running container names
+          for container in $(docker ps --format "{{.Names}}"); do
+            if [[ $container == *$(basename "$(pwd)")* ]]; then
+              # Check if the file exists in the matched container
+              if docker exec $container test -f /ws/.CONTAINER_INITIALIZED_PLACEHOLDER; then
+                container_initialized=true
+                break
+              fi
+            fi
+          done
+
+          if [[ $container_initialized == true ]]; then
+            echo "Build sentinel file found after $i seconds!"
+            break
+          fi
+
+          if [[ $i -ge $CATKIN_BUILD_TIMEOUT_SECONDS ]]; then
+            echo "TIMEOUT: Build sentinel file not found!"
+            echo "Output from find: $(docker exec "$(docker ps --format "{{.Names}}" | grep "$(basename "$(pwd)")")" bash -c "find / -name .CONTAINER_INITIALIZED_PLACEHOLDER")"
+            echo "Output from ls: $(docker exec "$(docker ps --format "{{.Names}}" | grep "$(basename "$(pwd)")")" bash -c "ls")"
+
+            exit 1
+          fi
+          sleep 10
+        done
+
+    - name: ROS Service Health Check
+      run: |
+        if [[ $(docker exec master-container bash -c "source /opt/ros/noetic/setup.bash && rosservice list") != *"rosout"* ]]; then  
+          echo "Health check failed!"
+          echo "Output from rosservice from master does not contain rosout:"
+          echo $(docker exec master-container bash -c "source /opt/ros/noetic/setup.bash && rosservice list")
+          exit 1
+        fi
