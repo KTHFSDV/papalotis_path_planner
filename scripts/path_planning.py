@@ -24,11 +24,11 @@ planner = PathPlanner(MissionTypes.trackdrive)
 
 class PathPlanner:
     def __init__(self):
+        '''initialize the path planner node'''
         rospy.init_node("path_planner", anonymous=True)
         rospy.Subscriber("/slam/output/odom", Odometry, self.odom_callback)
         rospy.Subscriber("/slam/output/markers_map", MarkerArray, self.marker_callback)
         rospy.Subscriber( "/navigation/speed_profiler/path", PlannedPath, self.curr_path_callback)
-        # self.pub = rospy.Publisher('/kthfs/result', Float32, queue_size=10)
 
             
         self.original_path_pub = rospy.Publisher("/original_path", Path, queue_size=10)
@@ -49,6 +49,8 @@ class PathPlanner:
         self.false_cones = MarkerArray()
         self.false_p_left = MarkerArray()
         self.rate = rospy.Rate(100)
+        self.car_position = None
+        self.car_direction = None
         print("running")
 
 
