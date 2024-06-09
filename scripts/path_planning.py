@@ -19,10 +19,10 @@ from copy import deepcopy
 # Rest of the code
 
 UNCOLORED_CONES = True
-planner = PathPlanner(MissionTypes.trackdrive)
+planner = PathPlanner(MissionTypes.autocross)
 
 
-class PathPlanner:
+class PlannerNode:
     def __init__(self):
         '''initialize the path planner node'''
         rospy.init_node("path_planner", anonymous=True)
@@ -51,7 +51,9 @@ class PathPlanner:
         self.rate = rospy.Rate(100)
         self.car_position = None
         self.car_direction = None
+        self.new_path = Path()
         print("running")
+
 
 
     def run_node(self):
@@ -59,6 +61,18 @@ class PathPlanner:
             if self.car_position is not None and self.car_direction is not None and self.cones_left_raw.size != 0 and self.cones_right_raw.size != 0:
                 self.generate_new_path(self.car_position, self.car_direction, self.cones_left_raw, self.cones_right_raw, both_cones=False)
             self.rate.sleep()
+
+
+    def filter_path(self, path, n_point = 20):
+        '''take the n_point from the generated path as a node, and interpolate the path between them  
+        args:
+        - n_points (int): number of points to take
+        - path (n x 2): the generated path
+        return:
+        - filtered_path (n x 2): the filtered path
+        '''
+
+
 
     def generate_new_path(self, car_pos, car_dir,  cones_left_raw, cones_right_raw, both_cones = True):
         '''
@@ -83,7 +97,6 @@ class PathPlanner:
 
         mask_is_left[np.argsort(np.linalg.norm(cones_left_adjusted, axis=1))[5:]] = False
         mask_is_right[np.argsort(np.linalg.norm(cones_right_adjusted, axis=1))[5:]] = False
-
        
 
 
@@ -122,6 +135,8 @@ class PathPlanner:
             poseStamp.pose.position.x = pose[1]
             poseStamp.pose.position.y = pose[2]
             uncolored_path.poses.append(poseStamp)
+
+        self.new_path = generated_path
 
         self.uncolored_path_pub.publish(uncolored_path)
         self.generated_path_pub.publish(generated_path)
@@ -316,7 +331,7 @@ class PathPlanner:
 
 if __name__ == "__main__":    
     try:
-        node = PathPlanner()
+        node = PlannerNode()
         node.run_node()
     except rospy.ROSInterruptException:
         pass
