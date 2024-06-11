@@ -16,10 +16,13 @@ import tf
 from tf.transformations import quaternion_from_euler, euler_from_quaternion
 import threading
 from copy import deepcopy
+import time
+
 # Rest of the code
 
-UNCOLORED_CONES = True
-planner = PathPlanner(MissionTypes.autocross)
+UNCOLORED_CONES = True # Set to True to use uncolored cones
+VERBOSE = True # Set to True to generate the colored path without the false cones
+planner = PathPlanner(MissionTypes.trackdrive)
 
 
 class PlannerNode:
@@ -30,7 +33,7 @@ class PlannerNode:
         rospy.Subscriber("/slam/output/markers_map", MarkerArray, self.marker_callback)
         rospy.Subscriber( "/navigation/speed_profiler/path", PlannedPath, self.curr_path_callback)
 
-            
+        self.recorded_path_pub = rospy.Publisher("/recorded_path", Path, queue_size=10)
         self.original_path_pub = rospy.Publisher("/original_path", Path, queue_size=10)
         self.generated_path_pub = rospy.Publisher("/generated_path", Path, queue_size=10)
         self.generate_heading_pub = rospy.Publisher("/heading", Marker, queue_size=10)
@@ -38,8 +41,9 @@ class PlannerNode:
         self.false_cones_pub = rospy.Publisher("/false_cones", MarkerArray, queue_size=10)
         self.yaw_test = rospy.Publisher("/yaw_test", Float32, queue_size=10)
         rospy.Timer(rospy.Duration(1/2), self.customPath_to_path)
-        # rospy.Timer(rospy.Duration(1/2), self.generate_new_path)
+        # rospy.Timer(rospy.Duration(0.1), self.record_path)
         self.br = tf.TransformBroadcaster()
+        
 
         self.curr_path = None
         
@@ -52,25 +56,52 @@ class PlannerNode:
         self.car_position = None
         self.car_direction = None
         self.new_path = Path()
+        self.recorded_path = Path()
+        self.recorded_path.header.frame_id = "odom"
         print("running")
 
 
 
     def run_node(self):
+        '''run the path planner node every 100hz'''
         while not rospy.is_shutdown():
             if self.car_position is not None and self.car_direction is not None and self.cones_left_raw.size != 0 and self.cones_right_raw.size != 0:
+                
+                start_time = time.time()
                 self.generate_new_path(self.car_position, self.car_direction, self.cones_left_raw, self.cones_right_raw, both_cones=False)
+                end_time = time.time()
+                elapsed_time = end_time - start_time
+                print(f"Time taken: {elapsed_time} seconds")
             self.rate.sleep()
 
 
-    def filter_path(self, path, n_point = 20):
-        '''take the n_point from the generated path as a node, and interpolate the path between them  
+    def record_path(self):
+        '''take the current car position and find the closest points in the generated path. append the point to be the recorded path.
         args:
-        - n_points (int): number of points to take
-        - path (n x 2): the generated path
-        return:
-        - filtered_path (n x 2): the filtered path
+        - self.path (n x 2): the generated path
+        - self.car_pos ([x,y]): the car's position        
         '''
+
+        num_points = 5 # the number of points iterate through in the generated path
+        closest_dist = np.inf
+        closest_point = None
+        for point  in self.new_path.poses[:num_points]:
+            point = np.array([point.pose.position.x, point.pose.position.y])
+            dist = math.dist(self.car_position, point)
+            if dist < closest_dist:
+                closest_dist = dist
+                closest_point = point
+        return closest_point
+        # if closest_point is not None:
+        #     closest_pose = PoseStamped()
+        #     closest_pose.header.frame_id = "odom"
+        #     closest_pose.header.stamp = self.stamp
+        #     closest_pose.pose.position.x = closest_point[0]
+        #     closest_pose.pose.position.y = closest_point[1]
+        #     self.recorded_path.poses.append(closest_pose)
+            # self.recorded_path_pub.publish(self.recorded_path)
+
+
 
 
 
@@ -85,12 +116,17 @@ class PlannerNode:
         - both_cones (bool): If False, only the left cones will be used.
 
         '''
-
         if not cones_left_raw.size:
             return
         
         mask_is_left = np.ones(len(cones_left_raw), dtype=bool)
         mask_is_right = np.ones(len(cones_right_raw), dtype=bool)
+
+        aligned_car_pos = self.record_path()
+        if aligned_car_pos is not None and math.dist(aligned_car_pos, car_pos) < 1.5:
+            car_pos = aligned_car_pos
+            print("aligned")
+
 
         cones_left_adjusted = cones_left_raw - car_pos
         cones_right_adjusted = cones_right_raw - car_pos
@@ -98,20 +134,20 @@ class PlannerNode:
         mask_is_left[np.argsort(np.linalg.norm(cones_left_adjusted, axis=1))[5:]] = False
         mask_is_right[np.argsort(np.linalg.norm(cones_right_adjusted, axis=1))[5:]] = False
        
+        if VERBOSE:
 
+            path = self.run_path_planner(cones_left_raw, cones_right_raw, mask_is_left, mask_is_right, car_pos, car_dir)
 
-        path = self.run_path_planner(cones_left_raw, cones_right_raw, mask_is_left, mask_is_right, car_pos, car_dir)
-
-        generated_path = Path()
-        generated_path.header.frame_id = "odom"
-        generated_path.header.stamp = self.stamp
-        for pose in path:
-            poseStamp = PoseStamped()
-            poseStamp.header.frame_id = "odom"
-            poseStamp.header.stamp = self.stamp
-            poseStamp.pose.position.x = pose[1]
-            poseStamp.pose.position.y = pose[2]
-            generated_path.poses.append(poseStamp)
+            generated_path = Path()
+            generated_path.header.frame_id = "odom"
+            generated_path.header.stamp = self.stamp
+            for pose in path:
+                poseStamp = PoseStamped()
+                poseStamp.header.frame_id = "odom"
+                poseStamp.header.stamp = self.stamp
+                poseStamp.pose.position.x = pose[1]
+                poseStamp.pose.position.y = pose[2]
+                generated_path.poses.append(poseStamp)
 
 
         if not both_cones:
@@ -140,6 +176,7 @@ class PlannerNode:
 
         self.uncolored_path_pub.publish(uncolored_path)
         self.generated_path_pub.publish(generated_path)
+        # self.record_path(path, car_pos)
         
 
     def run_path_planner(self, cones_left_raw, cones_right_raw, mask_left, mask_right, car_pos, car_dir, false_cones= np.array([]), uncolored = False, both_cones = True):
@@ -205,14 +242,6 @@ class PlannerNode:
         ) = out
 
         return path
-
-    def time_check(self):
-        def wrapper():
-            self.convert_path(None)
-        func = wrapper
-        t = timeit.Timer(func)
-        execution_time = t.timeit(number=100)
-        print(f"Execution time: {execution_time/100} seconds")
 
     def customPath_to_path(self, event):
         '''
