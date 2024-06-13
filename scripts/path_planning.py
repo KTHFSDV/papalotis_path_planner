@@ -28,7 +28,7 @@ planner = PathPlanner(MissionTypes.trackdrive)
 
 class PlannerNode:
     def __init__(self):
-        '''initialize the path planner node'''
+        """initialize the path planner node"""
         rospy.init_node("path_planner", anonymous=True)
         rospy.Subscriber("/slam/output/odom", Odometry, self.odom_callback)
         rospy.Subscriber("/slam/output/markers_map", MarkerArray, self.marker_callback)
@@ -66,7 +66,7 @@ class PlannerNode:
 
 
     def run_node(self):
-        '''run the path planner node every 100hz'''
+        """run the path planner node"""
         while not rospy.is_shutdown():
             if self.car_position is not None and self.car_direction is not None and self.cones_left_raw.size != 0 and self.cones_right_raw.size != 0:
                 
@@ -75,6 +75,7 @@ class PlannerNode:
                 end_time = time.time()
                 elapsed_time = end_time - start_time
                 print(f"Time taken: {elapsed_time} seconds")
+                self.false_cones_pub.publish(self.false_cones)
             self.rate.sleep()
 
     def record_path(self, event):
@@ -109,11 +110,12 @@ class PlannerNode:
 
 
     def align_car_pos(self):
-        '''take the current car position and find the closest points in the generated path. append the point to be the recorded path.
-        args:
-        - self.path (n x 2): the generated path
-        - self.car_pos ([x,y]): the car's position        
-        '''
+        """
+        take the current car position and find the closest points in the generated path. append the point to be the recorded path.
+        used variables:
+        - self.new_path (n x 2): the generated path
+        - self.car_position ([x,y]): the car's position        
+        """
 
         num_points = 5 # the number of points iterate through in the generated path
         closest_dist = np.inf
@@ -139,7 +141,7 @@ class PlannerNode:
 
 
     def generate_new_path(self, car_pos, car_dir,  cones_left_raw, cones_right_raw, both_cones = True):
-        '''
+        """
         Generate and publish a new path based on the car's position, direction and the cones detected by the camera.
         Args:
         - car_pos ([x,y]): The car's position in odometry frame.
@@ -148,7 +150,7 @@ class PlannerNode:
         - cones_right_raw (n x 2): The cones detected on the right side of the car.
         - both_cones (bool): If False, only the left cones will be used.
 
-        '''
+        """
         if not cones_left_raw.size:
             return
         
@@ -213,7 +215,7 @@ class PlannerNode:
         
 
     def run_path_planner(self, cones_left_raw, cones_right_raw, mask_left, mask_right, car_pos, car_dir, false_cones= np.array([]), uncolored = False, both_cones = True):
-        '''
+        """
         Runs the path planner with the given cones and car position.
         Args:
         - cones_left_raw (n x 2)
@@ -227,7 +229,7 @@ class PlannerNode:
         - both_cones (bool)
         Return:
         - path (n x 2) : The generated path in the odometry frame.
-        '''
+        """
 
         if not uncolored:
             cones_left = cones_left_raw[mask_left]
@@ -277,10 +279,10 @@ class PlannerNode:
         return path
 
     def customPath_to_path(self, event):
-        '''
+        """
         Converts the custom path to a Path message and publishes it.
         
-        '''
+        """
         converted_path = Path()
         if self.curr_path is not None and self.markers is not None:
             converted_path.header.frame_id = "odom"
@@ -293,6 +295,7 @@ class PlannerNode:
                 poseStamp.pose.position.y = y
                 converted_path.poses.append(poseStamp)
             self.original_path_pub.publish(converted_path)
+            
             self.create_false_cones(self.markers.markers)
             
 
@@ -303,6 +306,7 @@ class PlannerNode:
         # rospy.loginfo(self.curr_path)
 
     def marker_callback(self, markers):
+        """Callback function for the marker subscriber. Updates the cones detected and generate false cones"""
         self.markers = markers
         self.cones_right_raw = np.array([])
         self.cones_left_raw = np.array([])
@@ -320,7 +324,6 @@ class PlannerNode:
                 else:
                     self.cones_left_raw = np.vstack((self.cones_left_raw, position))
         
-        self.false_cones_pub.publish(self.false_cones)
         
 
     def create_false_cones(self, cones, generate_radius=4):
@@ -354,9 +357,9 @@ class PlannerNode:
                 self.false_cones.markers.append(new_cone)      
 
     def odom_callback(self, odom):
-        '''
+        """
         Callback function for the odometry subscriber. Updates the car's position and orientation.
-        '''
+        """
         self.stamp = odom.header.stamp
         self.car_x = odom.pose.pose.position.x
         self.car_y = odom.pose.pose.position.y
@@ -368,9 +371,9 @@ class PlannerNode:
         
         
     def generate_marker(self, odom):
-        '''
+        """
         Generates and publish a marker for car heading.
-        '''
+        """
         heading = Marker()
         heading.header.frame_id = "odom"
         heading.header.stamp = odom.header.stamp
