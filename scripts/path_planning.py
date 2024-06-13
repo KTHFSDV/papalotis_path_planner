@@ -17,6 +17,7 @@ from tf.transformations import quaternion_from_euler, euler_from_quaternion
 import threading
 from copy import deepcopy
 import time
+from scipy.interpolate import splprep, splev
 
 # Rest of the code
 
@@ -41,11 +42,12 @@ class PlannerNode:
         self.false_cones_pub = rospy.Publisher("/false_cones", MarkerArray, queue_size=10)
         self.yaw_test = rospy.Publisher("/yaw_test", Float32, queue_size=10)
         rospy.Timer(rospy.Duration(1/2), self.customPath_to_path)
-        # rospy.Timer(rospy.Duration(0.1), self.record_path)
+        rospy.Timer(rospy.Duration(1), self.record_path)
         self.br = tf.TransformBroadcaster()
         
 
         self.curr_path = None
+        self.recorded_node = None
         
         self.stamp = None
         self.cones_right_raw = np.array([])
@@ -58,6 +60,7 @@ class PlannerNode:
         self.new_path = Path()
         self.recorded_path = Path()
         self.recorded_path.header.frame_id = "odom"
+        self.aligned_car_pos = None
         print("running")
 
 
@@ -74,8 +77,38 @@ class PlannerNode:
                 print(f"Time taken: {elapsed_time} seconds")
             self.rate.sleep()
 
+    def record_path(self, event):
+        """record path from by aligning the car position to the closest point in generated path,
+        apply spline to the sets of points and interpolate into a new path message"""
 
-    def record_path(self):
+        if self.aligned_car_pos is not None:
+            self.recorded_path.poses = []
+            if self.recorded_node is None:
+                self.recorded_node = self.aligned_car_pos
+            else:
+                self.recorded_node = np.vstack((self.recorded_node, self.aligned_car_pos))
+                x = self.recorded_node[:,0]
+                y = self.recorded_node[:,1]
+                if len(self.recorded_node) > 3:
+                    tck, u = splprep([x, y], s=0)
+
+                    # Create new points from the spline
+                    u_new = np.linspace(0, 1, 10*len(self.recorded_node))
+                    x_new, y_new = splev(u_new, tck)
+                    # print(x_new, y_new)
+                    for i in range(len(x_new)):
+                        new_pose = PoseStamped()
+                        new_pose.header.frame_id = "odom"
+                        new_pose.header.stamp = self.stamp
+                        new_pose.pose.position.x = x_new[i]
+                        new_pose.pose.position.y = y_new[i]
+                        self.recorded_path.poses.append(new_pose)
+                    self.recorded_path_pub.publish(self.recorded_path)
+
+
+
+
+    def align_car_pos(self):
         '''take the current car position and find the closest points in the generated path. append the point to be the recorded path.
         args:
         - self.path (n x 2): the generated path
@@ -122,9 +155,9 @@ class PlannerNode:
         mask_is_left = np.ones(len(cones_left_raw), dtype=bool)
         mask_is_right = np.ones(len(cones_right_raw), dtype=bool)
 
-        aligned_car_pos = self.record_path()
+        aligned_car_pos = self.align_car_pos()
         if aligned_car_pos is not None and math.dist(aligned_car_pos, car_pos) < 1.5:
-            car_pos = aligned_car_pos
+            self.aligned_car_pos = aligned_car_pos
             print("aligned")
 
 
@@ -176,7 +209,7 @@ class PlannerNode:
 
         self.uncolored_path_pub.publish(uncolored_path)
         self.generated_path_pub.publish(generated_path)
-        # self.record_path(path, car_pos)
+        
         
 
     def run_path_planner(self, cones_left_raw, cones_right_raw, mask_left, mask_right, car_pos, car_dir, false_cones= np.array([]), uncolored = False, both_cones = True):
