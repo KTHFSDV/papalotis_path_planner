@@ -18,6 +18,7 @@ import threading
 from copy import deepcopy
 import time
 from scipy.interpolate import splprep, splev
+import pandas as pd
 
 # Rest of the code
 
@@ -25,6 +26,9 @@ UNCOLORED_CONES = True # Set to True to use uncolored cones
 VERBOSE = True # Set to True to generate the colored path without the false cones
 planner = PathPlanner(MissionTypes.trackdrive)
 
+### for filtering out duplicate cones ###
+seen_left_cones = set() 
+seen_right_cones = set()
 
 class PlannerNode:
     def __init__(self):
@@ -88,6 +92,7 @@ class PlannerNode:
                 self.recorded_node = self.aligned_car_pos
             else:
                 self.recorded_node = np.vstack((self.recorded_node, self.aligned_car_pos))
+                self.recorded_node = np.unique(self.recorded_node, axis=0)
                 x = self.recorded_node[:,0]
                 y = self.recorded_node[:,1]
                 if len(self.recorded_node) > 3:
@@ -127,14 +132,6 @@ class PlannerNode:
                 closest_dist = dist
                 closest_point = point
         return closest_point
-        # if closest_point is not None:
-        #     closest_pose = PoseStamped()
-        #     closest_pose.header.frame_id = "odom"
-        #     closest_pose.header.stamp = self.stamp
-        #     closest_pose.pose.position.x = closest_point[0]
-        #     closest_pose.pose.position.y = closest_point[1]
-        #     self.recorded_path.poses.append(closest_pose)
-            # self.recorded_path_pub.publish(self.recorded_path)
 
 
 
@@ -151,6 +148,7 @@ class PlannerNode:
         - both_cones (bool): If False, only the left cones will be used.
 
         """
+
         if not cones_left_raw.size:
             return
         
@@ -177,6 +175,7 @@ class PlannerNode:
             generated_path.header.frame_id = "odom"
             generated_path.header.stamp = self.stamp
             for pose in path:
+
                 poseStamp = PoseStamped()
                 poseStamp.header.frame_id = "odom"
                 poseStamp.header.stamp = self.stamp
@@ -230,7 +229,7 @@ class PlannerNode:
         Return:
         - path (n x 2) : The generated path in the odometry frame.
         """
-
+        self.filter_markers()
         if not uncolored:
             cones_left = cones_left_raw[mask_left]
             cones_right = cones_right_raw[mask_right] if both_cones else np.array([])
@@ -306,7 +305,8 @@ class PlannerNode:
         # rospy.loginfo(self.curr_path)
 
     def marker_callback(self, markers):
-        """Callback function for the marker subscriber. Updates the cones detected and generate false cones"""
+        global seen_right_cones, seen_left_cones
+        """Callback function for the marker subscriber. Updates the detected cones and generate false cones"""
         self.markers = markers
         self.cones_right_raw = np.array([])
         self.cones_left_raw = np.array([])
@@ -324,7 +324,29 @@ class PlannerNode:
                 else:
                     self.cones_left_raw = np.vstack((self.cones_left_raw, position))
         
+
         
+            
+            
+        
+    def filter_markers(self):
+        if self.cones_left_raw.any():
+            self.cones_left_raw = np.unique(self.cones_left_raw, axis=0)
+        if self.cones_right_raw.any():
+            self.cones_right_raw = np.unique(self.cones_right_raw, axis=0)
+        combined_cones = np.vstack((self.cones_left_raw, self.cones_right_raw))
+        if combined_cones.any():
+            #find duplicate cones from combined_cones
+            # Convert to pandas DataFrame for easier manipulation
+            df = pd.DataFrame(combined_cones, columns=['x', 'y'])
+            
+            # Find duplicates
+            duplicate_cones = df[df.duplicated()]
+            
+            # Remove duplicates from cones_left_raw
+            cones_left_df = pd.DataFrame(self.cones_left_raw, columns=['x', 'y'])
+            self.cones_left_raw = pd.concat([duplicate_cones, cones_left_df]).drop_duplicates(keep=False).to_numpy()
+
 
     def create_false_cones(self, cones, generate_radius=4):
         r = cones[0].scale.x
