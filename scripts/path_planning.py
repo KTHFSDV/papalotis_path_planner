@@ -46,7 +46,7 @@ class PlannerNode:
         self.false_cones_pub = rospy.Publisher("/false_cones", MarkerArray, queue_size=10)
         self.yaw_test = rospy.Publisher("/yaw_test", Float32, queue_size=10)
         rospy.Timer(rospy.Duration(1/2), self.customPath_to_path)
-        rospy.Timer(rospy.Duration(1), self.record_path)
+        rospy.Timer(rospy.Duration(1/2), self.record_path)
         self.br = tf.TransformBroadcaster()
         
 
@@ -75,7 +75,7 @@ class PlannerNode:
             if self.car_position is not None and self.car_direction is not None and self.cones_left_raw.size != 0 and self.cones_right_raw.size != 0:
                 
                 start_time = time.time()
-                self.generate_new_path(self.car_position, self.car_direction, self.cones_left_raw, self.cones_right_raw, both_cones=False)
+                self.generate_new_path(self.car_position, self.car_direction, self.cones_left_raw, self.cones_right_raw, both_cones=True)
                 end_time = time.time()
                 elapsed_time = end_time - start_time
                 print(f"Time taken: {elapsed_time} seconds")
@@ -152,6 +152,8 @@ class PlannerNode:
         if not cones_left_raw.size:
             return
         
+        cones_left_raw, cones_right_raw = self.filter_markers(cones_left_raw, cones_right_raw)
+        
         mask_is_left = np.ones(len(cones_left_raw), dtype=bool)
         mask_is_right = np.ones(len(cones_right_raw), dtype=bool)
 
@@ -168,7 +170,15 @@ class PlannerNode:
         mask_is_right[np.argsort(np.linalg.norm(cones_right_adjusted, axis=1))[5:]] = False
        
         if VERBOSE:
+            combined_cones = np.vstack((cones_left_raw, cones_right_raw))
+            df = pd.DataFrame(combined_cones, columns=['x', 'y'])
+            
+            # Find duplicates
+            duplicate_cones = df[df.duplicated()]
+            if duplicate_cones.size != 0:
+                print("Duplicate cones found")
 
+            
             path = self.run_path_planner(cones_left_raw, cones_right_raw, mask_is_left, mask_is_right, car_pos, car_dir)
 
             generated_path = Path()
@@ -183,6 +193,9 @@ class PlannerNode:
                 poseStamp.pose.position.y = pose[2]
                 generated_path.poses.append(poseStamp)
 
+
+
+        # running path planner with false cones
 
         if not both_cones:
             cones_right_raw = np.array([])
@@ -229,7 +242,7 @@ class PlannerNode:
         Return:
         - path (n x 2) : The generated path in the odometry frame.
         """
-        self.filter_markers()
+        
         if not uncolored:
             cones_left = cones_left_raw[mask_left]
             cones_right = cones_right_raw[mask_right] if both_cones else np.array([])
@@ -329,24 +342,24 @@ class PlannerNode:
             
             
         
-    def filter_markers(self):
-        if self.cones_left_raw.any():
-            self.cones_left_raw = np.unique(self.cones_left_raw, axis=0)
-        if self.cones_right_raw.any():
-            self.cones_right_raw = np.unique(self.cones_right_raw, axis=0)
-        combined_cones = np.vstack((self.cones_left_raw, self.cones_right_raw))
-        if combined_cones.any():
-            #find duplicate cones from combined_cones
-            # Convert to pandas DataFrame for easier manipulation
-            df = pd.DataFrame(combined_cones, columns=['x', 'y'])
-            
-            # Find duplicates
-            duplicate_cones = df[df.duplicated()]
-            
+    def filter_markers(self, left_cones, right_cones):
+        left_cones = np.unique(left_cones, axis=0)
+        right_cones = np.unique(right_cones, axis=0)
+        combined_cones = np.vstack((left_cones, right_cones))
+        #find duplicate cones from combined_cones
+        # Convert to pandas DataFrame for easier manipulation
+        df = pd.DataFrame(combined_cones, columns=['x', 'y'])
+        
+        # Find duplicates
+        duplicate_cones = df[df.duplicated()]
+        
+        if duplicate_cones.size != 0:
+            print("Duplicate cones found")
             # Remove duplicates from cones_left_raw
-            cones_left_df = pd.DataFrame(self.cones_left_raw, columns=['x', 'y'])
-            self.cones_left_raw = pd.concat([duplicate_cones, cones_left_df]).drop_duplicates(keep=False).to_numpy()
-
+            cones_left_df = pd.DataFrame(left_cones, columns=['x', 'y'])
+            left_cones = pd.concat([duplicate_cones, cones_left_df]).drop_duplicates(keep=False).to_numpy()
+            return left_cones,right_cones
+        return left_cones, right_cones
 
     def create_false_cones(self, cones, generate_radius=4):
         r = cones[0].scale.x
