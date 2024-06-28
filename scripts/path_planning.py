@@ -22,8 +22,10 @@ import pandas as pd
 
 # Rest of the code
 
-UNCOLORED_CONES = True # Set to True to use uncolored cones
-VERBOSE = True # Set to True to generate the colored path without the false cones
+OUTPUT = 3 # Set to 1 to output the colored cones, 2 to output the uncolored cones, 3 to output both
+BOTH_CONES = True # Set to True to use both left and right cones
+min_cones = 3 # Minimum number of cones for the path planner to be used
+
 planner = PathPlanner(MissionTypes.trackdrive)
 
 ### for filtering out duplicate cones ###
@@ -75,11 +77,12 @@ class PlannerNode:
             if self.car_position is not None and self.car_direction is not None and self.cones_left_raw.size != 0 and self.cones_right_raw.size != 0:
                 
                 start_time = time.time()
-                self.generate_new_path(self.car_position, self.car_direction, self.cones_left_raw, self.cones_right_raw, both_cones=True)
-                end_time = time.time()
-                elapsed_time = end_time - start_time
-                print(f"Time taken: {elapsed_time} seconds")
-                self.false_cones_pub.publish(self.false_cones)
+                if self.cones_right_raw.size > min_cones and self.cones_left_raw.size > min_cones:
+                    self.generate_new_path(self.car_position, self.car_direction, self.cones_left_raw, self.cones_right_raw, both_cones=BOTH_CONES)
+                    end_time = time.time()
+                    elapsed_time = end_time - start_time
+                    print(f"Time taken: {elapsed_time} seconds")
+                    self.false_cones_pub.publish(self.false_cones)
             self.rate.sleep()
 
     def record_path(self, event):
@@ -149,6 +152,12 @@ class PlannerNode:
 
         """
 
+        uncolored_path = Path()
+        generated_path = Path()
+        
+        if cones_right_raw.size == 2:
+            print("wow!")
+
         if not cones_left_raw.size:
             return
         
@@ -156,29 +165,15 @@ class PlannerNode:
         
         mask_is_left = np.ones(len(cones_left_raw), dtype=bool)
         mask_is_right = np.ones(len(cones_right_raw), dtype=bool)
+        
 
         aligned_car_pos = self.align_car_pos()
         if aligned_car_pos is not None and math.dist(aligned_car_pos, car_pos) < 1.5:
             self.aligned_car_pos = aligned_car_pos
             print("aligned")
 
-
-        cones_left_adjusted = cones_left_raw - car_pos
-        cones_right_adjusted = cones_right_raw - car_pos
-
-        mask_is_left[np.argsort(np.linalg.norm(cones_left_adjusted, axis=1))[5:]] = False
-        mask_is_right[np.argsort(np.linalg.norm(cones_right_adjusted, axis=1))[5:]] = False
-       
-        if VERBOSE:
-            combined_cones = np.vstack((cones_left_raw, cones_right_raw))
-            df = pd.DataFrame(combined_cones, columns=['x', 'y'])
-            
-            # Find duplicates
-            duplicate_cones = df[df.duplicated()]
-            if duplicate_cones.size != 0:
-                print("Duplicate cones found")
-
-            
+        if OUTPUT == 1 or OUTPUT == 3:
+            # running colored cones path planner without false cones 
             path = self.run_path_planner(cones_left_raw, cones_right_raw, mask_is_left, mask_is_right, car_pos, car_dir)
 
             generated_path = Path()
@@ -193,36 +188,39 @@ class PlannerNode:
                 poseStamp.pose.position.y = pose[2]
                 generated_path.poses.append(poseStamp)
 
+            self.generated_path_pub.publish(generated_path)
 
+        if OUTPUT == 2 or OUTPUT == 3:
 
-        # running path planner with false cones
+            # running path planner with false cones
 
-        if not both_cones:
-            cones_right_raw = np.array([])
-            mask_is_left = np.ones(len(cones_left_raw), dtype=bool)
-            cones_left_adjusted = cones_left_raw - car_pos
-            mask_is_left[np.argsort(np.linalg.norm(cones_left_adjusted, axis=1))[5:]] = False
-            mask_is_right = np.zeros(len(cones_right_raw), dtype=bool)
+            if not both_cones:
+                cones_right_raw = np.array([])
+                mask_is_left = np.ones(len(cones_left_raw), dtype=bool)
+                mask_is_right = np.zeros(len(cones_right_raw), dtype=bool)
 
-        false_cones = np.array([(marker.pose.position.x, marker.pose.position.y) for marker in self.false_cones.markers])
+            false_cones = np.array([(marker.pose.position.x, marker.pose.position.y) for marker in self.false_cones.markers])
 
-        path = self.run_path_planner(cones_left_raw, cones_right_raw, mask_is_left, mask_is_right, car_pos, car_dir, false_cones, uncolored=False, both_cones=both_cones)
+            path = self.run_path_planner(cones_left_raw, cones_right_raw, mask_is_left, mask_is_right, car_pos, car_dir, false_cones, uncolored=True, both_cones=both_cones)
+            
+            uncolored_path = Path()
+            uncolored_path.header.frame_id = "odom"
+            uncolored_path.header.stamp = self.stamp
+            for pose in path:
+                poseStamp = PoseStamped()
+                poseStamp.header.frame_id = "odom"
+                poseStamp.header.stamp = self.stamp
+                poseStamp.pose.position.x = pose[1]
+                poseStamp.pose.position.y = pose[2]
+                uncolored_path.poses.append(poseStamp)
+
+            self.uncolored_path_pub.publish(uncolored_path)
+
+        used_path = generated_path if OUTPUT == 1 else uncolored_path
+        self.new_path = used_path
+
         
-        uncolored_path = Path()
-        uncolored_path.header.frame_id = "odom"
-        uncolored_path.header.stamp = self.stamp
-        for pose in path:
-            poseStamp = PoseStamped()
-            poseStamp.header.frame_id = "odom"
-            poseStamp.header.stamp = self.stamp
-            poseStamp.pose.position.x = pose[1]
-            poseStamp.pose.position.y = pose[2]
-            uncolored_path.poses.append(poseStamp)
-
-        self.new_path = generated_path
-
-        self.uncolored_path_pub.publish(uncolored_path)
-        self.generated_path_pub.publish(generated_path)
+        
         
         
 
@@ -353,6 +351,7 @@ class PlannerNode:
         # Find duplicates
         duplicate_cones = df[df.duplicated()]
         
+
         if duplicate_cones.size != 0:
             print("Duplicate cones found")
             # Remove duplicates from cones_left_raw
