@@ -1,12 +1,18 @@
 <launch>
   <!-- Load the parameters from the YAML file -->
-  <rosparam file="$(find time_pub_sub_pkg)/config/parameters.yaml" /> <!-- TODO: This should match the name of the package -->
-
-  <!-- TODO: Add your nodes below. Make sure to specify the correct values for the 'name', 'pkg', and 'type' attributes. -->
-
+  <!-- <rosparam file="$(find time_pub_sub_pkg)/config/parameters.yaml" /> TODO: This should match the name of the package -->
 
   <!-- Assuming you have a time_publisher node, here's its launch command -->
-  <node name="time_publisher" pkg="time_pub_sub_pkg" type="example_time_publisher" output="screen"/>
-  <!-- Assuming you also have a time_subscriber node, here's its launch command -->
-  <node name="time_subscriber" pkg="time_pub_sub_pkg" type="time_subscriber.py" output="screen"/>
+  <node name="path_planning_node" pkg="papalotis_path_planner" type="path_planning.py" output="screen"/>
+  
+  <arg name="bag_file" default="3lap_fast.bag" />
+
+  <!-- Play the rosbag -->
+  <node name="play_bag" pkg="rosbag" type="play" output="screen" args="/root/localfiles/$(arg bag_file)" />
+
+  <!-- Launch RViz -->
+  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find papalotis_path_planner)/config/path_planner_config.rviz" output="screen" >
+    <remap from="rosout" to="/dev/null" />
+    <remap from="rosout_agg" to="/dev/null" />
+  </node>
 </launch>

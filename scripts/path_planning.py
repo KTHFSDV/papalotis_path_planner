@@ -46,6 +46,7 @@ class PlannerNode:
         self.generate_heading_pub = rospy.Publisher("/heading", Marker, queue_size=10)
         self.uncolored_path_pub = rospy.Publisher("/uncolored_path", Path, queue_size=10)
         self.false_cones_pub = rospy.Publisher("/false_cones", MarkerArray, queue_size=10)
+        self.filtered_cones_pub = rospy.Publisher("/filtered_cones", MarkerArray, queue_size=10)
         self.yaw_test = rospy.Publisher("/yaw_test", Float32, queue_size=10)
         rospy.Timer(rospy.Duration(1/2), self.customPath_to_path)
         rospy.Timer(rospy.Duration(1/2), self.record_path)
@@ -113,8 +114,6 @@ class PlannerNode:
                         new_pose.pose.position.y = y_new[i]
                         self.recorded_path.poses.append(new_pose)
                     self.recorded_path_pub.publish(self.recorded_path)
-
-
 
 
     def align_car_pos(self):
@@ -341,6 +340,10 @@ class PlannerNode:
             
         
     def filter_markers(self, left_cones, right_cones):
+        # false_pos_cone = np.array([8.420903205871582, -3.949068546295166])
+        # for right_cone in right_cones:
+        #     if right_cone == false_pos_cone:
+        #         right_cones = np.delete(right_cones, np.where(right_cones == right_cone), axis=0)
         left_cones = np.unique(left_cones, axis=0)
         right_cones = np.unique(right_cones, axis=0)
         combined_cones = np.vstack((left_cones, right_cones))
@@ -388,7 +391,7 @@ class PlannerNode:
                 new_cone.color.r = 1.0
                 new_cone.color.g = 1.0
                 new_cone.color.b = 1.0
-                self.false_cones.markers.append(new_cone)      
+                self.false_cones.markers.append(new_cone)     
 
     def odom_callback(self, odom):
         """
@@ -399,12 +402,12 @@ class PlannerNode:
         self.car_y = odom.pose.pose.position.y
         quart_angle = [odom.pose.pose.orientation.x, odom.pose.pose.orientation.y, odom.pose.pose.orientation.z, odom.pose.pose.orientation.w]
         self.car_yaw = euler_from_quaternion(quart_angle)[2]
-        self.generate_marker(odom)
+        self.generate_car_marker(odom)
         self.car_position = np.array([self.car_x, self.car_y])
         self.car_direction = unit_2d_vector_from_angle(self.car_yaw)
         
         
-    def generate_marker(self, odom):
+    def generate_car_marker(self, odom):
         """
         Generates and publish a marker for car heading.
         """

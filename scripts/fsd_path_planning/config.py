@@ -33,7 +33,7 @@ def get_cone_sorting_config(
 
     return dict(
         max_n_neighbors=5,
-        max_dist=6.5,
+        max_dist=6.5, #TODO: default is 6.5
         max_dist_to_first=6.0,
         max_length=12,
         threshold_directional_angle=np.deg2rad(40),
