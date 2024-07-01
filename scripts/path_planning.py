@@ -21,7 +21,7 @@ from scipy.interpolate import splprep, splev
 import pandas as pd
 
 # Rest of the code
-
+# FALSE_CONES = False # Set to True to use false cones #TODO: Implement false cones flag 
 OUTPUT = 3 # Set to 1 to output the colored cones, 2 to output the uncolored cones, 3 to output both
 BOTH_CONES = True # Set to True to use both left and right cones
 min_cones = 3 # Minimum number of cones for the path planner to be used
@@ -42,14 +42,14 @@ class PlannerNode:
 
         self.recorded_path_pub = rospy.Publisher("/recorded_path", Path, queue_size=10)
         self.original_path_pub = rospy.Publisher("/original_path", Path, queue_size=10)
-        self.generated_path_pub = rospy.Publisher("/generated_path", Path, queue_size=10)
+        self.generated_path_pub = rospy.Publisher("/colored_path", Path, queue_size=10)
         self.generate_heading_pub = rospy.Publisher("/heading", Marker, queue_size=10)
         self.uncolored_path_pub = rospy.Publisher("/uncolored_path", Path, queue_size=10)
         self.false_cones_pub = rospy.Publisher("/false_cones", MarkerArray, queue_size=10)
         self.filtered_cones_pub = rospy.Publisher("/filtered_cones", MarkerArray, queue_size=10)
         self.yaw_test = rospy.Publisher("/yaw_test", Float32, queue_size=10)
-        rospy.Timer(rospy.Duration(1/2), self.customPath_to_path)
         rospy.Timer(rospy.Duration(1/2), self.record_path)
+        rospy.Timer(rospy.Duration(1/2), self.create_false_cones)
         self.br = tf.TransformBroadcaster()
         
 
@@ -64,7 +64,7 @@ class PlannerNode:
         self.rate = rospy.Rate(100)
         self.car_position = None
         self.car_direction = None
-        self.new_path = Path()
+        self.used_path = Path()
         self.recorded_path = Path()
         self.recorded_path.header.frame_id = "odom"
         self.aligned_car_pos = None
@@ -120,14 +120,14 @@ class PlannerNode:
         """
         take the current car position and find the closest points in the generated path. append the point to be the recorded path.
         used variables:
-        - self.new_path (n x 2): the generated path
+        - self.used_path (n x 2): the generated path
         - self.car_position ([x,y]): the car's position        
         """
 
         num_points = 5 # the number of points iterate through in the generated path
         closest_dist = np.inf
         closest_point = None
-        for point  in self.new_path.poses[:num_points]:
+        for point  in self.used_path.poses[:num_points]:
             point = np.array([point.pose.position.x, point.pose.position.y])
             dist = math.dist(self.car_position, point)
             if dist < closest_dist:
@@ -150,10 +150,7 @@ class PlannerNode:
         - both_cones (bool): If False, only the left cones will be used.
 
         """
-
-        uncolored_path = Path()
-        generated_path = Path()
-        
+ 
         if cones_right_raw.size == 2:
             print("wow!")
 
@@ -161,69 +158,63 @@ class PlannerNode:
             return
         
         cones_left_raw, cones_right_raw = self.filter_markers(cones_left_raw, cones_right_raw)
-        
-        mask_is_left = np.ones(len(cones_left_raw), dtype=bool)
-        mask_is_right = np.ones(len(cones_right_raw), dtype=bool)
-        
+
 
         aligned_car_pos = self.align_car_pos()
         if aligned_car_pos is not None and math.dist(aligned_car_pos, car_pos) < 1.5:
             self.aligned_car_pos = aligned_car_pos
             print("aligned")
 
+        # false_cones = np.array([(marker.pose.position.x, marker.pose.position.y) for marker in self.false_cones.markers])
+
+        if not both_cones:
+            cones_right_raw = np.array([])
+
         if OUTPUT == 1 or OUTPUT == 3:
-            # running colored cones path planner without false cones 
-            path = self.run_path_planner(cones_left_raw, cones_right_raw, mask_is_left, mask_is_right, car_pos, car_dir)
+            # running path planner with COLORED cones
 
-            generated_path = Path()
-            generated_path.header.frame_id = "odom"
-            generated_path.header.stamp = self.stamp
-            for pose in path:
+            path = self.run_path_planner(cones_left_raw, cones_right_raw, car_pos, car_dir)
 
-                poseStamp = PoseStamped()
-                poseStamp.header.frame_id = "odom"
-                poseStamp.header.stamp = self.stamp
-                poseStamp.pose.position.x = pose[1]
-                poseStamp.pose.position.y = pose[2]
-                generated_path.poses.append(poseStamp)
-
-            self.generated_path_pub.publish(generated_path)
+            colored_path = self.publish_calculated_path(path)
 
         if OUTPUT == 2 or OUTPUT == 3:
 
-            # running path planner with false cones
+            # running path planner with UNCOLORED cones
 
-            if not both_cones:
-                cones_right_raw = np.array([])
-                mask_is_left = np.ones(len(cones_left_raw), dtype=bool)
-                mask_is_right = np.zeros(len(cones_right_raw), dtype=bool)
-
-            false_cones = np.array([(marker.pose.position.x, marker.pose.position.y) for marker in self.false_cones.markers])
-
-            path = self.run_path_planner(cones_left_raw, cones_right_raw, mask_is_left, mask_is_right, car_pos, car_dir, false_cones, uncolored=True, both_cones=both_cones)
+            path = self.run_path_planner(cones_left_raw, cones_right_raw, car_pos, car_dir, uncolored=True)
             
-            uncolored_path = Path()
-            uncolored_path.header.frame_id = "odom"
-            uncolored_path.header.stamp = self.stamp
-            for pose in path:
-                poseStamp = PoseStamped()
-                poseStamp.header.frame_id = "odom"
-                poseStamp.header.stamp = self.stamp
-                poseStamp.pose.position.x = pose[1]
-                poseStamp.pose.position.y = pose[2]
-                uncolored_path.poses.append(poseStamp)
-
-            self.uncolored_path_pub.publish(uncolored_path)
-
-        used_path = generated_path if OUTPUT == 1 else uncolored_path
-        self.new_path = used_path
+            uncolored_path = self.publish_calculated_path(path, colored=False)
+            
+        #use the generated path into the align_car_pos function
+        self.used_path = colored_path if OUTPUT == 1 else uncolored_path
+         
 
         
         
-        
+    def publish_calculated_path(self, path, colored=True):
+        """Publish the calculated path as a Path message.
+        args: 
+        path : the calculated path
+        colored : if True, publish to the colored path topic, else publish to the uncolored path topic
+        """
+
+        path_msg = Path()
+        path_msg.header.frame_id = "odom"
+        path_msg.header.stamp = self.stamp
+        for pose in path:
+            poseStamp = PoseStamped()
+            poseStamp.header.frame_id = "odom"
+            poseStamp.header.stamp = self.stamp
+            poseStamp.pose.position.x = pose[1]
+            poseStamp.pose.position.y = pose[2]
+            path_msg.poses.append(poseStamp)
+
+        self.uncolored_path_pub.publish(path_msg) if not colored else self.generated_path_pub.publish(path_msg)
+
+        return path_msg
         
 
-    def run_path_planner(self, cones_left_raw, cones_right_raw, mask_left, mask_right, car_pos, car_dir, false_cones= np.array([]), uncolored = False, both_cones = True):
+    def run_path_planner(self, cones_left, cones_right, car_pos, car_dir, uncolored = False, both_cones = True):
         """
         Runs the path planner with the given cones and car position.
         Args:
@@ -240,29 +231,12 @@ class PlannerNode:
         - path (n x 2) : The generated path in the odometry frame.
         """
         
-        if not uncolored:
-            cones_left = cones_left_raw[mask_left]
-            cones_right = cones_right_raw[mask_right] if both_cones else np.array([])
-            
-            if false_cones.size == 0:
-                cones_unknown = np.row_stack(
-                    [cones_left_raw[~mask_left], cones_right_raw[~mask_right]]
-                ) if both_cones else cones_left_raw[~mask_left]
-            else:
-                cones_unknown = np.row_stack(
-                    [cones_left_raw[~mask_left], cones_right_raw[~mask_right], false_cones]) if both_cones else np.row_stack([cones_left_raw[~mask_left], false_cones])
-
-        else : 
+        if uncolored:
+            cones_unknown = np.row_stack([cones_left, cones_right])
             cones_left = np.array([])
             cones_right = np.array([])
-            if false_cones.size == 0:
-                cones_unknown = np.row_stack(
-                    [cones_left_raw, cones_right_raw]
-                ) if both_cones else cones_left_raw
-            else:
-                cones_unknown = np.row_stack(
-                [cones_left_raw, cones_right_raw, false_cones]
-            ) if both_cones else np.row_stack([cones_left_raw, false_cones])
+        else:
+            cones_unknown = np.array([])
         
 
 
@@ -305,7 +279,7 @@ class PlannerNode:
                 converted_path.poses.append(poseStamp)
             self.original_path_pub.publish(converted_path)
             
-            self.create_false_cones(self.markers.markers)
+            
             
 
 
@@ -363,36 +337,41 @@ class PlannerNode:
             return left_cones,right_cones
         return left_cones, right_cones
 
-    def create_false_cones(self, cones, generate_radius=4):
-        r = cones[0].scale.x
-        if random.random() < 0.1:
-            # Generate a random radius between 1.2r and 1.5r
-            random_radius = random.uniform(1.4 * r, 2.0 * r)
+    def create_false_cones(self,event):
+        generate_radius = 4
+        try:
+            cones = self.markers.markers
+            r = cones[0].scale.x
+            if random.random() < 0.1:
+                # Generate a random radius between 1.2r and 1.5r
+                random_radius = random.uniform(1.4 * r, 2.0 * r)
 
-            # Generate a random angle between 0 and 2π
-            random_angle = random.uniform(0, 2 * math.pi)
-            potential_cones = []
-            #iterate through the cones, find the cones inside the car radiusx   
-            for cone in cones:
-                cone_pos = np.array([cone.pose.position.x, cone.pose.position.y])
-                car_pos = np.array([self.car_x, self.car_y])
-                if math.dist(cone_pos, car_pos) < generate_radius:
-                    potential_cones.append(cone)
+                # Generate a random angle between 0 and 2π
+                random_angle = random.uniform(0, 2 * math.pi)
+                potential_cones = []
+                #iterate through the cones, find the cones inside the car radiusx   
+                for cone in cones:
+                    cone_pos = np.array([cone.pose.position.x, cone.pose.position.y])
+                    car_pos = np.array([self.car_x, self.car_y])
+                    if math.dist(cone_pos, car_pos) < generate_radius:
+                        potential_cones.append(cone)
 
-                    
-            if potential_cones != []:
-                new_cone = deepcopy(random.choice(potential_cones))
-                # Convert polar coordinates to Cartesian coordinates
-                new_x = cone.pose.position.x + random_radius * math.cos(random_angle)
-                new_y = cone.pose.position.y + random_radius * math.sin(random_angle)   
-                new_cone.pose.position.x = new_x
-                new_cone.pose.position.y = new_y
-                new_cone.color.a = 1.0
-                new_cone.color.r = 1.0
-                new_cone.color.g = 1.0
-                new_cone.color.b = 1.0
-                self.false_cones.markers.append(new_cone)     
-
+                        
+                if potential_cones != []:
+                    new_cone = deepcopy(random.choice(potential_cones))
+                    # Convert polar coordinates to Cartesian coordinates
+                    new_x = cone.pose.position.x + random_radius * math.cos(random_angle)
+                    new_y = cone.pose.position.y + random_radius * math.sin(random_angle)   
+                    new_cone.pose.position.x = new_x
+                    new_cone.pose.position.y = new_y
+                    new_cone.color.a = 1.0
+                    new_cone.color.r = 1.0
+                    new_cone.color.g = 1.0
+                    new_cone.color.b = 1.0
+                    self.false_cones.markers.append(new_cone)   
+        except AttributeError:  
+            pass
+        
     def odom_callback(self, odom):
         """
         Callback function for the odometry subscriber. Updates the car's position and orientation.

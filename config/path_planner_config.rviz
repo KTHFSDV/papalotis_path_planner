@@ -6,7 +6,9 @@ Panels:
       Expanded:
         - /Global Options1
         - /Uncolored_path1
+        - /colored_path1
         - /FalseCones1
+        - /Recorded_path1
       Splitter Ratio: 0.5
     Tree Height: 555
   - Class: rviz/Selection
@@ -57,7 +59,7 @@ Visualization Manager:
       Marker Topic: /slam/output/markers_map
       Name: Cones
       Namespaces:
-        fastslam2_map: true
+        "": true
       Queue Size: 100
       Value: true
     - Alpha: 1
@@ -105,7 +107,7 @@ Visualization Manager:
       Radius: 0.029999999329447746
       Shaft Diameter: 0.10000000149011612
       Shaft Length: 0.10000000149011612
-      Topic: /generated_path
+      Topic: /colored_path
       Unreliable: false
       Value: true
     - Class: rviz/Marker
@@ -121,9 +123,33 @@ Visualization Manager:
       Marker Topic: /false_cones
       Name: FalseCones
       Namespaces:
-        {}
+        "": true
       Queue Size: 100
       Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz/Path
+      Color: 25; 255; 0
+      Enabled: false
+      Head Diameter: 0.30000001192092896
+      Head Length: 0.20000000298023224
+      Length: 0.30000001192092896
+      Line Style: Lines
+      Line Width: 0.029999999329447746
+      Name: Recorded_path
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Queue Size: 10
+      Radius: 0.029999999329447746
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
+      Topic: /recorded_path
+      Unreliable: false
+      Value: false
     - Angle Tolerance: 0.10000000149011612
       Class: rviz/Odometry
       Covariance:
@@ -187,7 +213,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 21.260740280151367
+      Distance: 67.6090087890625
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -195,9 +221,9 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: -0.12985214591026306
-        Y: 0.025359828025102615
-        Z: -2.298316240310669
+        X: -0.9972094297409058
+        Y: 10.36324405670166
+        Z: -4.636303424835205
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
@@ -223,5 +249,5 @@ Window Geometry:
   Views:
     collapsed: true
   Width: 1080
-  X: 74
-  Y: 27
+  X: 777
+  Y: 42
